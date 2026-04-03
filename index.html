@@ -164,3 +164,34 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
     });
 </script>
+    // Fungsi untuk membuat blok dengan warna acak dan pinggiran hitam
+    function createVoxel() {
+        const group = new THREE.Group();
+        
+        // List warna-warna cerah (Vibrant Colors)
+        const colors = [0x2196F3, 0x4CAF50, 0xFFEB3B, 0xF44336, 0x9C27B0, 0xFF9800];
+        const randomColor = colors[Math.floor(Math.random() * colors.length)];
+        
+        // Blok Utama dengan warna acak
+        const mesh = new THREE.Mesh(
+            voxelGeo, 
+            new THREE.MeshPhongMaterial({ 
+                color: randomColor,
+                specular: 0xffffff,
+                shininess: 30 
+            })
+        );
+        mesh.castShadow = mesh.receiveShadow = true;
+        
+        // Pinggiran Hitam (Edges) tetap ada supaya jelas pemisahnya
+        const edges = new THREE.EdgesGeometry(voxelGeo);
+        const line = new THREE.LineSegments(
+            edges, 
+            new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 })
+        );
+        
+        group.add(mesh);
+        group.add(line);
+        return group;
+    }
+    
