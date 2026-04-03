@@ -1,1 +1,166 @@
-# hilmi-lagi-gabut
+<style>
+    body { margin: 0; overflow: hidden; background: #e0f2f1; touch-action: none; }
+    #video-container {
+        position: absolute; top: 12px; left: 12px;
+        width: 140px; height: 105px; 
+        border: 2px solid white;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        z-index: 10; background: #333; border-radius: 12px;
+        overflow: hidden;
+    }
+    #webcam { width: 100%; height: 100%; transform: scaleX(-1); object-fit: cover; position: absolute; top: 0; left: 0; }
+    #canvas-overlay { width: 100%; height: 100%; transform: scaleX(-1); position: absolute; top: 0; left: 0; pointer-events: none; }
+    
+    #gui {
+        position: absolute; top: 12px; right: 12px;
+        background: rgba(255, 255, 255, 0.9); color: #333; padding: 12px;
+        font-family: sans-serif; font-size: 11px; border-radius: 10px; 
+        pointer-events: none; border: 1px solid rgba(0,0,0,0.1);
+    }
+</style>
+
+<div id="video-container">
+    <video id="webcam" autoplay playsinline></video>
+    <canvas id="canvas-overlay"></canvas>
+</div>
+<div id="gui">
+    <b style="color: #2196F3;">VOXEL BUILDER</b><br>
+    - Cubit Jari: Pasang Blok<br>
+    - Geser Layar: Putar Kamera<br>
+    - 2 Jari: Zoom
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+    const video = document.getElementById('webcam');
+    const overlay = document.getElementById('canvas-overlay');
+    const overlayCtx = overlay.getContext('2d');
+    overlay.width = 480; overlay.height = 360;
+
+    // --- 1. THREE.JS SETUP ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb); // Latar Biru Langit
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    camera.position.set(15, 15, 20);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    // --- 2. GRID & CAHAYA ---
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const light = new THREE.DirectionalLight(0xffffff, 0.6);
+    light.position.set(10, 20, 10);
+    light.castShadow = true;
+    scene.add(light);
+
+    // Grid Putih Terang
+    const grid = new THREE.GridHelper(30, 30, 0xffffff, 0xffffff);
+    grid.material.opacity = 0.8;
+    grid.material.transparent = true;
+    scene.add(grid);
+
+    // Kursor Penempatan
+    const pointer = new THREE.Mesh(
+        new THREE.BoxGeometry(1.05, 1.05, 1.05),
+        new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true })
+    );
+    scene.add(pointer);
+
+    // --- 3. LOGIKA VOXEL ---
+    let isPinching = false;
+    let currentGroup = null;
+    const voxelGeo = new THREE.BoxGeometry(1, 1, 1);
+    
+    function createVoxel() {
+        const group = new THREE.Group();
+        
+        // Blok Biru Utama
+        const mesh = new THREE.Mesh(voxelGeo, new THREE.MeshPhongMaterial({ color: 0x2196F3 }));
+        mesh.castShadow = mesh.receiveShadow = true;
+        
+        // Garis Tepi Hitam (Agar tidak menyatu)
+        const edges = new THREE.EdgesGeometry(voxelGeo);
+        const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 }));
+        
+        group.add(mesh);
+        group.add(line);
+        return group;
+    }
+
+    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6 });
+
+    hands.onResults((results) => {
+        overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+        if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+            pointer.visible = false; return;
+        }
+
+        pointer.visible = true;
+        const pts = results.multiHandLandmarks[0];
+        const thumb = pts[4];
+        const index = pts[8];
+
+        // Indikator di kamera
+        overlayCtx.fillStyle = "#00ffff";
+        pts.forEach(p => {
+            overlayCtx.beginPath(); overlayCtx.arc(p.x * overlay.width, p.y * overlay.height, 3, 0, 7); overlayCtx.fill();
+        });
+
+        const x = (0.5 - index.x) * 25;
+        const y = (1 - index.y) * 18;
+        const z = index.z * 25;
+        pointer.position.set(x, y, z);
+
+        const dist = Math.hypot(thumb.x - index.x, thumb.y - index.y);
+
+        if (dist < 0.05) { 
+            if (!isPinching) {
+                currentGroup = createVoxel();
+                scene.add(currentGroup);
+                isPinching = true;
+                controls.enabled = false;
+            }
+            currentGroup.position.copy(pointer.position);
+        } else if (dist > 0.08 && isPinching) {
+            currentGroup.position.set(Math.round(currentGroup.position.x), Math.round(currentGroup.position.y), Math.round(currentGroup.position.z));
+            currentGroup = null; isPinching = false; controls.enabled = true;
+        }
+
+        overlayCtx.strokeStyle = isPinching ? "#ff0000" : "#00ff00";
+        overlayCtx.lineWidth = 6;
+        overlayCtx.beginPath();
+        overlayCtx.moveTo(thumb.x * overlay.width, thumb.y * overlay.height);
+        overlayCtx.lineTo(index.x * overlay.width, index.y * overlay.height);
+        overlayCtx.stroke();
+    });
+
+    const cameraUtils = new Camera(video, {
+        onFrame: async () => { await hands.send({image: video}); },
+        width: 480, height: 360
+    });
+    cameraUtils.start();
+
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+</script>
